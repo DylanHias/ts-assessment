@@ -1,39 +1,66 @@
+import { filterAnnotations, sortAnnotations, sortEntities } from './helpers';
+import { outputSchema } from './schemas';
 import { Annotation, Entity, Input } from './types/input';
 import { ConvertedAnnotation, ConvertedEntity, Output } from './types/output';
 
-// TODO: Convert Input to the Output structure. Do this in an efficient and generic way.
-// HINT: Make use of the helper library "lodash"
 export const convertInput = (input: Input): Output => {
   const documents = input.documents.map((document) => {
-    // TODO: map the entities to the new structure and sort them based on the property "name"
-    // Make sure the nested children are also mapped and sorted
-    const entities = document.entities.map(convertEntity).sort(sortEntities);
+    const documentEntities = document.entities;
+    const entities = documentEntities.map(convertEntity(documentEntities)).sort(sortEntities);
 
-    // TODO: map the annotations to the new structure and sort them based on the property "index"
-    // Make sure the nested children are also mapped and sorted
-    const annotations = document.annotations.map(convertAnnotation).sort(sortAnnotations);
+    const documentAnnotations = document.annotations;
+    const annotations = documentAnnotations
+      .filter(filterAnnotations)
+      .map(convertAnnotation(documentAnnotations, entities))
+      .sort(sortAnnotations);
+
     return { id: document.id, entities, annotations };
   });
 
   return { documents };
 };
 
-// HINT: you probably need to pass extra argument(s) to this function to make it performant.
-const convertEntity = (entity: Entity): ConvertedEntity => {
-  throw new Error('Not implemented');
-};
+const convertEntity =
+  (documentEntities: Entity[]) =>
+  (entity: Entity): ConvertedEntity => {
+    const children = documentEntities
+      .filter((documentEntity) => documentEntity.refs.includes(entity.id))
+      .map(convertEntity(documentEntities))
+      .sort(sortEntities);
 
-// HINT: you probably need to pass extra argument(s) to this function to make it performant.
-const convertAnnotation = (annotation: Annotation): ConvertedAnnotation => {
-  throw new Error('Not implemented');
-};
+    return {
+      id: entity.id,
+      name: entity.name,
+      type: entity.type,
+      class: entity.class,
+      children,
+    };
+  };
 
-const sortEntities = (entityA: ConvertedEntity, entityB: ConvertedEntity) => {
-  throw new Error('Not implemented');
-};
+const convertAnnotation =
+  (documentAnnotations: Annotation[], entities: ConvertedEntity[]) =>
+  (annotation: Annotation): ConvertedAnnotation => {
+    const entity = entities.find((entity) => entity.id === annotation.entityId);
 
-const sortAnnotations = (annotationA: ConvertedAnnotation, annotationB: ConvertedAnnotation) => {
-  throw new Error('Not implemented');
-};
+    if (!entity) {
+      throw new Error(`No entity was for annotation with id: ${annotation.id}`);
+    }
 
-// BONUS: Create validation function that validates the result of "convertInput". Use yup as library to validate your result.
+    const children = documentAnnotations
+      .filter((documentAnnotation) => documentAnnotation.refs.includes(annotation.id))
+      .map(convertAnnotation(documentAnnotations, entities))
+      .sort(sortAnnotations);
+
+    const index = annotation.indices?.[0]?.start ?? (children.length ? children[0].index : -1);
+    const { id, name } = entity;
+
+    return {
+      id: annotation.id,
+      entity: { id, name },
+      value: annotation.value,
+      index,
+      children,
+    };
+  };
+
+export const validateOutput = (output: Output): boolean => outputSchema.isValidSync(output);
